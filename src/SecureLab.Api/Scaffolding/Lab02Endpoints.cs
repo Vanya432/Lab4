@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
+using Microsoft.AspNetCore.Identity;
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -61,9 +62,12 @@ public static class Lab02Endpoints
                 Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
             }));
         });
-        app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, HttpContext context, UserManager<ApplicationUser> users, CancellationToken ct) =>
         {
             // ЛР 02: доповніть server validation, business rules та response contract.
+            var currentUser = await users.GetUserAsync(context.User);
+            if (currentUser is null)
+                return Results.Unauthorized();
             var errors = new Dictionary<string, string[]>();
 
             if (string.IsNullOrWhiteSpace(request.Title))
@@ -103,11 +107,15 @@ public static class Lab02Endpoints
 
             var incident = new Incident
             {
-                Id = Guid.NewGuid(), OwnerUserId = DbSeeder.AliceId,
-                Title = request.Title!.Trim(), Description = request.Description!.Trim(),
+                Id = Guid.NewGuid(),
+                OwnerUserId = currentUser.Id,
+                Title = request.Title!.Trim(),
+                Description = request.Description!.Trim(),
                 Severity = severity,
-                Status = IncidentStatus.New, OccurredAtUtc = request.OccurredAtUtc!.Value.ToUniversalTime(),
-                CreatedAtUtc = now, UpdatedAtUtc = now
+                Status = IncidentStatus.New,
+                OccurredAtUtc = request.OccurredAtUtc!.Value.ToUniversalTime(),
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
             };
             db.Incidents.Add(incident);
             await db.SaveChangesAsync(ct);
@@ -121,7 +129,7 @@ public static class Lab02Endpoints
                 incident.OccurredAtUtc,
                 incident.CreatedAtUtc);
             return Results.Created($"/api/incidents/{incident.Id}", response);
-        });
+        }).RequireAuthorization();
     }
 }
 

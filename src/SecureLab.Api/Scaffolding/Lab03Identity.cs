@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Identity;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
+using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -35,22 +37,64 @@ public static class Lab03Identity
 
     public static void MapLab03Identity(this WebApplication app)
     {
-        app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
+        app.MapPost("/api/auth/register", async (
+    RegistrationInput input,
+    UserManager<ApplicationUser> users) =>
         {
-            // ЛР 03: завершіть DTO validation та перевірки довірчої межі.
-            if (string.IsNullOrWhiteSpace(input.UserName) || string.IsNullOrWhiteSpace(input.Email)
-                || string.IsNullOrWhiteSpace(input.DisplayName) || string.IsNullOrEmpty(input.Password))
-                return Results.BadRequest();
+            if (!IsValidRegistration(input))
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Invalid registration data"
+                });
+            }
+
             var user = new ApplicationUser
             {
-                Id = Guid.NewGuid(), UserName = input.UserName.Trim(), Email = input.Email.Trim(),
-                DisplayName = input.DisplayName.Trim()
+                Id = Guid.NewGuid(),
+                UserName = input.UserName!.Trim(),
+                Email = input.Email!.Trim(),
+                DisplayName = input.DisplayName!.Trim()
             };
-            var result = await users.CreateAsync(user, input.Password);
-            if (!result.Succeeded) return Results.BadRequest(new { message = "Registration failed" });
-            var role = await users.AddToRoleAsync(user, DbSeeder.ReporterRole);
-            if (!role.Succeeded) throw new InvalidOperationException("Default role assignment failed.");
-            return Results.Created("/api/me", new { user.Id, user.UserName, user.DisplayName });
+
+            var result = await users.CreateAsync(user, input.Password!);
+
+            if (!result.Succeeded)
+            {
+                bool duplicate = result.Errors.Any(error =>
+                    error.Code == "DuplicateUserName" ||
+                    error.Code == "DuplicateEmail");
+
+                if (duplicate)
+                {
+                    return Results.Conflict(new
+                    {
+                        message = "Registration conflict"
+                    });
+                }
+
+                return Results.BadRequest(new
+                {
+                    message = "Registration failed"
+                });
+            }
+
+            var role = await users.AddToRoleAsync(
+                user, DbSeeder.ReporterRole);
+
+            if (!role.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    "Default role assignment failed.");
+            }
+
+            var response = new RegistrationResponse(
+                user.Id,
+                user.UserName!,
+                user.DisplayName
+            );
+
+            return Results.Created("/api/me", response);
         });
         app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn) =>
         {
@@ -59,19 +103,62 @@ public static class Lab03Identity
             var result = await signIn.PasswordSignInAsync(input.UserName, input.Password, false, false);
             return result.Succeeded ? Results.NoContent() : Results.Unauthorized();
         });
-        app.MapPost("/api/auth/logout", () => Results.StatusCode(StatusCodes.Status501NotImplemented));
-        // Навмисно хибна навчальна довіра: ЛР 03 замінює заявлений id на verified principal.
-        app.MapGet("/api/me", async (HttpContext context, SecureLabDbContext db) =>
+        app.MapPost("/api/auth/logout", async (
+    SignInManager<ApplicationUser> signIn) =>
         {
-            if (!Guid.TryParse(context.Request.Headers["X-Demo-UserId"], out var claimedId))
-                return Results.StatusCode(StatusCodes.Status501NotImplemented);
-            var user = await db.Users.FindAsync(claimedId);
-            return user is null ? Results.NotFound() : Results.Ok(new { user.Id, user.UserName, user.DisplayName });
-        });
+            await signIn.SignOutAsync();
+            return Results.NoContent();
+        }).RequireAuthorization();
+        // Навмисно хибна навчальна довіра: ЛР 03 замінює заявлений id на verified principal.
+        app.MapGet("/api/me", async (
+    HttpContext context,
+    UserManager<ApplicationUser> users) =>
+        {
+            var user = await users.GetUserAsync(context.User);
+
+            if (user is null)
+                return Results.Unauthorized();
+
+            return Results.Ok(new
+            {
+                user.Id,
+                user.UserName,
+                user.DisplayName
+            });
+        }).RequireAuthorization();
         // Приклад лише mechanics: не повертає identity і не реалізує оцінювану operation.
         app.MapGet("/api/auth/session-check", () => Results.NoContent()).RequireAuthorization();
+    }
+
+    private static bool IsValidRegistration(RegistrationInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.UserName) ||
+            string.IsNullOrWhiteSpace(input.Email) ||
+            string.IsNullOrWhiteSpace(input.DisplayName) ||
+            string.IsNullOrEmpty(input.Password))
+            return false;
+
+        string userName = input.UserName.Trim();
+        string email = input.Email.Trim();
+        string displayName = input.DisplayName.Trim();
+
+        if (!Regex.IsMatch(userName, @"^[a-zA-Z0-9_-]{3,32}$"))
+            return false;
+
+        if (email.Length > 254 ||
+            !new EmailAddressAttribute().IsValid(email))
+            return false;
+
+        if (displayName.Length > 100)
+            return false;
+
+        return true;
     }
 }
 
 public sealed record RegistrationInput(string? UserName, string? Email, string? DisplayName, string? Password);
 public sealed record LoginInput(string? UserName, string? Password);
+public sealed record RegistrationResponse(
+    Guid Id,
+    string UserName,
+    string DisplayName);
