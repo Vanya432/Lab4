@@ -35,15 +35,30 @@ function Test-IncidentAccess {
         throw "Login failed for $UserName"
     }
 
+    try {
     $response = Invoke-WebRequest `
         -Uri "$baseUrl/api/incidents/$IncidentId" `
         -Method Get `
         -WebSession $session `
         -UseBasicParsing
 
-    Write-Host "$UserName reads Alice incident: $($response.StatusCode)"
+    $statusCode = [int]$response.StatusCode
+}
+catch [System.Net.WebException] {
+    if ($null -eq $_.Exception.Response) {
+        throw
+    }
+
+    $statusCode = [int]$_.Exception.Response.StatusCode
+}
+
+Write-Host "$UserName reads incident $IncidentId : $statusCode"
 }
 
 Test-IncidentAccess -UserName "alice" -IncidentId $aliceIncidentId
 Test-IncidentAccess -UserName "bob" -IncidentId $aliceIncidentId
 Test-IncidentAccess -UserName "morgan" -IncidentId $aliceIncidentId
+
+$bobIncidentId = "20000000-0000-0000-0000-000000000002"
+
+Test-IncidentAccess -UserName "alice" -IncidentId $bobIncidentId

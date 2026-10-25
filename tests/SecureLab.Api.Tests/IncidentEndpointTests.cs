@@ -25,7 +25,9 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
     [Fact]
     public async Task GetDetails_ForUnknownId_ReturnsProblemDetails404()
     {
-        using var response = await _client.GetAsync($"/api/incidents/{Guid.NewGuid()}");
+        var password = Environment.GetEnvironmentVariable("SeedUsers__Password") ?? throw new InvalidOperationException("SeedUsers__Password is not set");
+        using var client = await factory.LoginAsync("alice", password);
+        using var response = await client.GetAsync($"/api/incidents/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
@@ -34,7 +36,9 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
     [Fact]
     public async Task GetDetails_DoesNotExposeInternalOwnerFields()
     {
-        using var response = await _client.GetAsync(
+        var password = Environment.GetEnvironmentVariable("SeedUsers__Password") ?? throw new InvalidOperationException("SeedUsers__Password is not set");
+        using var client = await factory.LoginAsync("alice", password);
+        using var response = await client.GetAsync(
             $"/api/incidents/{DbSeeder.AliceIncidentId}");
         var json = await response.Content.ReadAsStringAsync();
         using var document = JsonDocument.Parse(json);
@@ -52,5 +56,33 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
 
         Assert.DoesNotContain("innerHTML", script, StringComparison.Ordinal);
         Assert.Contains("textContent", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetDetails_BobCannotReadAliceIncident()
+    {
+        var password = Environment.GetEnvironmentVariable("SeedUsers__Password") ?? throw new InvalidOperationException("SeedUsers__Password is not set");
+        using var client = await factory.LoginAsync("bob", password);
+        using var response = await client.GetAsync($"/api/incidents/{DbSeeder.AliceIncidentId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetDetails_AnalystCanReadAliceIncident()
+    {
+        var password = Environment.GetEnvironmentVariable("SeedUsers__Password") ?? throw new InvalidOperationException("SeedUsers__Password is not set");
+        using var client = await factory.LoginAsync("morgan", password);
+        using var response = await client.GetAsync($"/api/incidents/{DbSeeder.AliceIncidentId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetDetails_AnonUser()
+    {
+        using var response = await _client.GetAsync($"/api/incidents/{DbSeeder.AliceIncidentId}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }
