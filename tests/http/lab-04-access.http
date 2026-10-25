@@ -1,0 +1,5 @@
+@baseUrl = http://localhost:5080
+
+### Перевірка анонімного доступу до інциденту Alice
+GET {{baseUrl}}/api/incidents/20000000-0000-0000-0000-000000000001
+Accept: application/json
